@@ -8,20 +8,7 @@ import time
 import json
 import urllib2
 import base64
-
-
-def get_config_params():
-
-    configs = {}
-    configs['cluster'] = 'SCBHaaSTEST'
-    configs['atlas_host'] = '10.20.174.137'
-    configs['atlas_port'] = 21000
-    configs['timeout'] = 30
-    configs['tagname'] = 'ray'
-    configs['atlas_user'] = 'admin'
-    configs['atlas_pass'] = 'admin'
-
-    return configs
+from read_config import get_config_params
 
 def gen_search_json( cluster, schema, table, column ):
 
