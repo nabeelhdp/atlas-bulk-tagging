@@ -8,7 +8,20 @@ import time
 import json
 import urllib2
 import base64
-import get_config_params
+
+
+def get_config_params():
+
+    configs = {}
+    configs['cluster'] = 'SCBHaaSTEST'
+    configs['atlas_host'] = '10.20.174.137'
+    configs['atlas_port'] = 21000
+    configs['timeout'] = 30
+    configs['tagname'] = 'ray'
+    configs['atlas_user'] = 'admin'
+    configs['atlas_pass'] = 'admin'
+
+    return configs
 
 def gen_search_json( cluster, schema, table, column ):
 
@@ -38,6 +51,7 @@ def extract_guidinfo( atlas_response, offset ):
         if len(atlas_response['entities']) > 0 :
             for entity in atlas_response['entities']:
                 guid_dict[entity["attributes"]['qualifiedName']] = entity['guid']
+                #print("Mapped keys -  {}: {}".format(entity["attributes"]['qualifiedName'],guid_dict[entity["attributes"]['qualifiedName']] ))
             if len(atlas_response['entities']) == 10000:
                offset = int(offset) + 1
             else:
@@ -108,6 +122,11 @@ def search_col_guid(colnameline):
         # If data extraction completed or no data extracted, exit loop
         if offset < 1 :
             break
+        if offset > 1 :
+            sr = open("skippedresults","a")
+            sr.write(querycol)
+            sr.close()
+            break
 
     return col_guid_map
 
@@ -136,12 +155,39 @@ def send_atlas_request( req, timeout):
        print("Empty response likely {}".format(response))
        return response
 
+def send_classify_post_request(piicolmap,configs):
+
+    tag_url = "http://{}:{}/api/atlas/v2/entity/bulk/classification".format(
+                configs['atlas_host'],
+                configs['atlas_port'],
+                )
+
+    counter = 0
+    guid_batch = []
+    for cols in piicolmap:
+       guid_batch.append(piicolmap[cols])
+       counter = counter + 1
+       if counter == 100:
+          guid_data = gen_tag_json( guid=guid_batch, tagname=configs['tagname'] )
+          tag_request = gen_http_req( tag_url, configs, guid_data)
+          tag_response = send_atlas_request( tag_request, configs['timeout'] )
+          try:
+              print(tag_response.read())
+          except AttributeError as e:
+              print("Warning. No JSON returned. Returned object : {}".format(tag_response))
+
+          # Reset counters
+          guid_batch = []
+          counter = 0
+
 def main():
 
     input_file = sys.argv[1]
     colentries = []
     with open(input_file) as f:
-        colentries = f.readlines()
+        colentries_ = f.readlines()
+
+    colentries = [s.replace("\r\n", "") for s in colentries_]
 
     # lastcols = [c.split(",")[-1] for c in clines]
     # uniqlastcols = list(set(lastcols))
@@ -172,36 +218,17 @@ def main():
         tbl = x[1]
         col = x[2]
         colfull = db + "." + tbl + "." + col + "@" + configs['cluster']
-        piicolmap[querycol] = col_guid_map[colfull]
+        try:
+            piicolmap[querycol] = col_guid_map[colfull]
+        except KeyError as k:
+            print ("Column not found in Atlas store: {}".format(querycol))
 
-
-    # Temporarily write output to a file so that it can be directly used next time
     piijson = json.dumps(piicolmap)
     piifile = open("pii_guid_map.json","w")
     piifile.write(piijson)
     piifile.close()
 
-    tag_url = "http://{}:{}/api/atlas/v2/entity/bulk/classification".format(
-                    configs['atlas_host'],
-                    configs['atlas_port'],
-                    )
-
-    counter = 0
-    guid_batch = []
-    for cols in piicolmap:
-       guid_batch.append(piicolmap[cols])
-       counter = counter + 1
-       if counter == 100:
-          guid_data = gen_tag_json( guid=guid_batch, tagname=configs['tagname'] )
-          tag_request = gen_http_req( tag_url, configs, guid_data)
-          tag_response = send_atlas_request( tag_request, configs['timeout'] )
-          try:
-              print(tag_response.read())
-          except AttributeError as e:
-              print("Warning. No JSON returned. Returned object : {}".format(tag_response))
-          # Reset counters
-          guid_batch = []
-          counter = 0
+    # send_classify_post_request(piicolmap=piicolmap,configs=configs)
 
 if __name__ == "__main__":
     main()
